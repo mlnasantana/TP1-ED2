@@ -2,146 +2,220 @@
 #define _FILE_OFFSET_BITS 64 
 
 #include "arvorebe.h"
+#include <string.h> // Memmove
 #include <time.h>
+
+// --- FUNÇÕES AUXILIARES ---
+
+TipoApontadorBE CriaNoBE(bool folha) {
+    TipoApontadorBE novo = (TipoApontadorBE)calloc(1, sizeof(TipoPaginaBE));
+    if (!novo) { perror("Erro malloc"); exit(1); }
+    // Como usamos calloc, n=0 e ponteiros=NULL já estão feitos
+    return novo;
+}
 
 void InicializaArvoreBEst(TipoApontadorBE* Arvore) {
     *Arvore = NULL;
 }
 
+void LiberaArvoreBE(TipoApontadorBE Ap) {
+    if (Ap != NULL) {
+        // Como não temos flag 'folha' explicita na struct original, 
+        // verificamos se o primeiro filho é NULL para saber se é folha
+        if (Ap->p[0] != NULL) { 
+            for (int i = 0; i <= Ap->n; i++) {
+                LiberaArvoreBE(Ap->p[i]);
+            }
+        }
+        free(Ap);
+    }
+}
+
+// --- PESQUISA ---
 TipoOffset PesquisaBE(int chave, TipoApontadorBE Ap, int *comp) {
-    long i = 1;
     if (Ap == NULL) return -1;
 
-    while (i < Ap->n && chave > Ap->chaves[i-1]) {
-        i++;
+    int i = 0;
+    while (i < Ap->n && chave > Ap->chaves[i]) {
         (*comp)++;
+        i++;
     }
 
-    (*comp)++;
-    if (chave == Ap->chaves[i-1]) {
-        return Ap->offsets[i-1]; // Retorna a posição no HD
+    (*comp)++; // Comparação final (igualdade)
+    if (i < Ap->n && chave == Ap->chaves[i]) {
+        return Ap->offsets[i];
     }
 
-    (*comp)++;
-    if (chave < Ap->chaves[i-1])
-        return PesquisaBE(chave, Ap->p[i-1], comp);
-    else
-        return PesquisaBE(chave, Ap->p[i], comp);
+    return PesquisaBE(chave, Ap->p[i], comp);
 }
 
-// Inserção auxiliar na página
-void InsereNaPaginaBE(TipoApontadorBE Ap, int chave, TipoOffset offset, TipoApontadorBE ApDir, int *comp) {
-    short NaoAchouPosicao;
-    int k;
+// --- MANIPULAÇÃO DE NÓS (REDISTRIBUIÇÃO E SPLIT) ---
 
-    k = Ap->n;
-    NaoAchouPosicao = (k > 0);
+// Move uma chave do Filho[i] para o Filho[i-1] (Irmão Esquerda) via Pai
+void RedistribuiEsquerda(TipoApontadorBE pai, int i) {
+    TipoApontadorBE filho = pai->p[i];
+    TipoApontadorBE irmaoEsq = pai->p[i-1];
 
-    while (NaoAchouPosicao) {
-        (*comp)++;
-        if (chave >= Ap->chaves[k-1]) {
-            NaoAchouPosicao = 0;
-            break;
+    // 1. Desce a chave do Pai para o final do Irmão Esquerdo
+    irmaoEsq->chaves[irmaoEsq->n] = pai->chaves[i-1];
+    irmaoEsq->offsets[irmaoEsq->n] = pai->offsets[i-1];
+    irmaoEsq->p[irmaoEsq->n + 1] = filho->p[0]; // Filho[0] do nó vira último do irmão
+    irmaoEsq->n++;
+
+    // 2. Sobe a primeira chave do Filho para o Pai
+    pai->chaves[i-1] = filho->chaves[0];
+    pai->offsets[i-1] = filho->offsets[0];
+
+    // 3. Remove a primeira chave do Filho (shift left)
+    memmove(&filho->chaves[0], &filho->chaves[1], (filho->n - 1) * sizeof(int));
+    memmove(&filho->offsets[0], &filho->offsets[1], (filho->n - 1) * sizeof(TipoOffset));
+    memmove(&filho->p[0], &filho->p[1], filho->n * sizeof(TipoApontadorBE));
+    filho->n--;
+}
+
+// Move uma chave do Filho[i] para o Filho[i+1] (Irmão Direita) via Pai
+void RedistribuiDireita(TipoApontadorBE pai, int i) {
+    TipoApontadorBE filho = pai->p[i];
+    TipoApontadorBE irmaoDir = pai->p[i+1];
+
+    // 1. Abre espaço no início do Irmão Direito
+    memmove(&irmaoDir->chaves[1], &irmaoDir->chaves[0], irmaoDir->n * sizeof(int));
+    memmove(&irmaoDir->offsets[1], &irmaoDir->offsets[0], irmaoDir->n * sizeof(TipoOffset));
+    memmove(&irmaoDir->p[1], &irmaoDir->p[0], (irmaoDir->n + 1) * sizeof(TipoApontadorBE));
+
+    // 2. Desce a chave do Pai para o início do Irmão Direito
+    irmaoDir->chaves[0] = pai->chaves[i];
+    irmaoDir->offsets[0] = pai->offsets[i];
+    irmaoDir->p[0] = filho->p[filho->n]; // Último ponteiro do filho vai pro irmão
+    irmaoDir->n++;
+
+    // 3. Sobe a última chave do Filho para o Pai
+    pai->chaves[i] = filho->chaves[filho->n - 1];
+    pai->offsets[i] = filho->offsets[filho->n - 1];
+
+    // 4. Remove a última chave do Filho
+    filho->n--;
+}
+
+// Divide o Filho[i] do Pai em dois (Split 1-para-2)
+void SplitFilho(TipoApontadorBE pai, int i) {
+    TipoApontadorBE filho = pai->p[i];
+    TipoApontadorBE novo = CriaNoBE(false); // Flag não importa muito aqui pois copiamos
+    novo->n = M_ESTRELA - 1;
+
+    // 1. Copia metade direita do filho para o novo nó
+    memcpy(novo->chaves, &filho->chaves[M_ESTRELA + 1], (M_ESTRELA - 1) * sizeof(int));
+    memcpy(novo->offsets, &filho->offsets[M_ESTRELA + 1], (M_ESTRELA - 1) * sizeof(TipoOffset));
+    memcpy(novo->p, &filho->p[M_ESTRELA + 1], M_ESTRELA * sizeof(TipoApontadorBE));
+
+    // 2. Reduz tamanho do filho original
+    filho->n = M_ESTRELA; 
+
+    // 3. Abre espaço no Pai para receber a mediana
+    memmove(&pai->p[i + 2], &pai->p[i + 1], (pai->n - i) * sizeof(TipoApontadorBE));
+    memmove(&pai->chaves[i + 1], &pai->chaves[i], (pai->n - i) * sizeof(int));
+    memmove(&pai->offsets[i + 1], &pai->offsets[i], (pai->n - i) * sizeof(TipoOffset));
+
+    // 4. Sobe a mediana e conecta o novo nó
+    pai->p[i + 1] = novo;
+    pai->chaves[i] = filho->chaves[M_ESTRELA];
+    pai->offsets[i] = filho->offsets[M_ESTRELA];
+    pai->n++;
+}
+
+// --- INSERÇÃO EM NÓ NÃO CHEIO (LÓGICA PROATIVA B*) ---
+void InsereNaoCheio(TipoApontadorBE x, int chave, TipoOffset offset, int *comp) {
+    int i = x->n - 1;
+
+    // Se é folha (p[0] == NULL indica folha nesta struct)
+    if (x->p[0] == NULL) {
+        while (i >= 0 && chave < x->chaves[i]) {
+            (*comp)++;
+            x->chaves[i + 1] = x->chaves[i];
+            x->offsets[i + 1] = x->offsets[i];
+            i--;
         }
-        
-        Ap->chaves[k] = Ap->chaves[k-1];
-        Ap->offsets[k] = Ap->offsets[k-1]; // Move offset junto
-        Ap->p[k+1] = Ap->p[k];
-        k--;
-        if (k < 1) NaoAchouPosicao = 0;
-    }
+        if (i >= 0) (*comp)++; 
 
-    Ap->chaves[k] = chave;
-    Ap->offsets[k] = offset;
-    Ap->p[k+1] = ApDir;
-    Ap->n++;
+        x->chaves[i + 1] = chave;
+        x->offsets[i + 1] = offset;
+        x->n++;
+    } 
+    else {
+        // É nó interno
+        while (i >= 0 && chave < x->chaves[i]) {
+            (*comp)++;
+            i--;
+        }
+        if (i >= 0) (*comp)++;
+        i++; // Índice do filho para descer
+
+        // --- AQUI ESTÁ A LÓGICA B* ---
+        // Antes de descer, verificamos se o filho está cheio
+        if (x->p[i]->n == MM_ESTRELA) {
+            
+            // 1. Tenta Redistribuir com Irmão Esquerdo (se existir e tiver espaço)
+            if (i > 0 && x->p[i-1]->n < MM_ESTRELA) {
+                RedistribuiDireita(x, i-1); // Move do Esq(i-1) pro Atual(i)? Não, move do Atual pro Esq?
+                // Lógica corrigida:
+                // Se o filho[i] está cheio, tentamos jogar pro [i-1] (Esq) ou [i+1] (Dir).
+                
+                // RedistribuiEsquerda: Joga DO filho[i] PARA filho[i-1]
+                RedistribuiEsquerda(x, i); 
+                
+                // Agora filho[i] tem espaço, prossegue
+                InsereNaoCheio(x->p[i], chave, offset, comp);
+            }
+            // 2. Tenta Redistribuir com Irmão Direito (se existir e tiver espaço)
+            else if (i < x->n && x->p[i+1]->n < MM_ESTRELA) {
+                // RedistribuiDireita: Joga DO filho[i] PARA filho[i+1]
+                RedistribuiDireita(x, i);
+                
+                // Agora filho[i] tem espaço, prossegue
+                InsereNaoCheio(x->p[i], chave, offset, comp);
+            }
+            // 3. Se vizinhos cheios, faz Split
+            else {
+                SplitFilho(x, i);
+                // Após split, a chave mediana subiu. Precisamos ver qual dos dois novos filhos (i ou i+1) recebe a chave
+                if (chave > x->chaves[i]) {
+                    i++;
+                }
+                InsereNaoCheio(x->p[i], chave, offset, comp);
+            }
+        } else {
+            // Filho não está cheio, desce normal
+            InsereNaoCheio(x->p[i], chave, offset, comp);
+        }
+    }
 }
 
-// Função recursiva interna
-void InsBE(int chave, TipoOffset offset, TipoApontadorBE Ap, short *Cresceu, 
-           int *ChaveRetorno, TipoOffset *OffsetRetorno, TipoApontadorBE *ApRetorno, int *comp) {
-    long i = 1;
-    long j;
-    TipoApontadorBE ApTemp;
-
-    if (Ap == NULL) {
-        *Cresceu = 1;
-        *ChaveRetorno = chave;
-        *OffsetRetorno = offset;
-        *ApRetorno = NULL;
+// --- FUNÇÃO PRINCIPAL DE INSERÇÃO ---
+void InsereBEst(int chave, TipoOffset offset, TipoApontadorBE* Arvore, int* comp) {
+    if (*Arvore == NULL) {
+        *Arvore = CriaNoBE(true);
+        (*Arvore)->chaves[0] = chave;
+        (*Arvore)->offsets[0] = offset;
+        (*Arvore)->n = 1;
         return;
     }
 
-    while (i < Ap->n && chave > Ap->chaves[i-1]) {
-        i++;
-        (*comp)++;
-    }
+    TipoApontadorBE raiz = *Arvore;
 
-    (*comp)++;
-    if (chave == Ap->chaves[i-1]) {
-        *Cresceu = 0; 
-        return;
-    }
-
-    (*comp)++;
-    if (chave < Ap->chaves[i-1]) i--;
-
-    InsBE(chave, offset, Ap->p[i], Cresceu, ChaveRetorno, OffsetRetorno, ApRetorno, comp);
-
-    if (!*Cresceu) return;
-
-    if (Ap->n < MM_ESTRELA) {
-        InsereNaPaginaBE(Ap, *ChaveRetorno, *OffsetRetorno, *ApRetorno, comp);
-        *Cresceu = 0;
-        return;
-    }
-
-    // --- SPLIT ---
-    // (Nota: Em uma implementação rigorosa de B*, tentaríamos redistribuir para irmãos
-    // antes de dividir. Aqui usamos o Split padrão para garantir estabilidade de memória)
-    ApTemp = (TipoApontadorBE)malloc(sizeof(TipoPaginaBE));
-    ApTemp->n = 0;
-    ApTemp->p[0] = NULL;
-
-    if (i < M_ESTRELA + 1) {
-        InsereNaPaginaBE(ApTemp, Ap->chaves[MM_ESTRELA-1], Ap->offsets[MM_ESTRELA-1], Ap->p[MM_ESTRELA], comp);
-        Ap->n--;
-        InsereNaPaginaBE(Ap, *ChaveRetorno, *OffsetRetorno, *ApRetorno, comp);
+    // Se a raiz está cheia, ela precisa crescer (Split)
+    // Raiz é exceção, não tem irmãos para redistribuir
+    if (raiz->n == MM_ESTRELA) {
+        TipoApontadorBE novaRaiz = CriaNoBE(false);
+        novaRaiz->p[0] = raiz;
+        *Arvore = novaRaiz;
+        SplitFilho(novaRaiz, 0);
+        InsereNaoCheio(novaRaiz, chave, offset, comp);
     } else {
-        InsereNaPaginaBE(ApTemp, *ChaveRetorno, *OffsetRetorno, *ApRetorno, comp);
-    }
-
-    for (j = M_ESTRELA + 2; j <= MM_ESTRELA; j++) {
-        InsereNaPaginaBE(ApTemp, Ap->chaves[j-1], Ap->offsets[j-1], Ap->p[j], comp);
-    }
-
-    Ap->n = M_ESTRELA;
-    ApTemp->p[0] = Ap->p[M_ESTRELA+1];
-    
-    *ChaveRetorno = Ap->chaves[M_ESTRELA];
-    *OffsetRetorno = Ap->offsets[M_ESTRELA];
-    *ApRetorno = ApTemp;
-}
-
-void InsereBEst(int chave, TipoOffset offset, TipoApontadorBE* Ap, int* comp) {
-    short Cresceu;
-    int ChaveRetorno;
-    TipoOffset OffsetRetorno;
-    TipoApontadorBE ApRetorno, ApTemp;
-
-    InsBE(chave, offset, *Ap, &Cresceu, &ChaveRetorno, &OffsetRetorno, &ApRetorno, comp);
-
-    if (Cresceu) {
-        ApTemp = (TipoApontadorBE)malloc(sizeof(TipoPaginaBE));
-        ApTemp->n = 1;
-        ApTemp->chaves[0] = ChaveRetorno;
-        ApTemp->offsets[0] = OffsetRetorno;
-        ApTemp->p[1] = ApRetorno;
-        ApTemp->p[0] = *Ap;
-        *Ap = ApTemp;
+        InsereNaoCheio(raiz, chave, offset, comp);
     }
 }
 
+// --- DRIVER ---
 void RodaArvoreBEstrela(const char* nomeArq, int chave_procurada, int quantReg, bool P_flag) {
     TipoApontadorBE arvore;
     Item registro_temp;
@@ -152,6 +226,10 @@ void RodaArvoreBEstrela(const char* nomeArq, int chave_procurada, int quantReg, 
     FILE* arq = fopen(nomeArq, "rb");
     if (!arq) { perror("Erro"); return; }
 
+    printf("\n========================================================\n");
+    printf("METODO: 4 - ARVORE B* (ESTRELA) [Implementacao Real]\n");
+    printf("========================================================\n");
+
     // --- FASE 1: CRIACAO ---
     clock_t inicio_criacao = clock();
     while(true) {
@@ -161,10 +239,6 @@ void RodaArvoreBEstrela(const char* nomeArq, int chave_procurada, int quantReg, 
     }
     clock_t fim_criacao = clock();
     double tempo_criacao = (double)(fim_criacao - inicio_criacao) / CLOCKS_PER_SEC;
-
-    printf("\n========================================================\n");
-    printf("METODO: 4 - ARVORE B* (ESTRELA)\n");
-    printf("========================================================\n");
 
     printf("--- FASE 1: CRIACAO DO INDICE ---\n");
     printf("Tempo Execucao: %.6f s\n", tempo_criacao);
@@ -207,19 +281,10 @@ void RodaArvoreBEstrela(const char* nomeArq, int chave_procurada, int quantReg, 
         printf("Comparacoes:    %d\n", comp_pesquisa);
     } 
     else {
-         printf("Modo experimental (media) nao formatado neste padrao.\n");
+         printf("Modo experimental (media) nao ativado.\n");
     }
     printf("========================================================\n");
 
     fclose(arq);
     LiberaArvoreBE(arvore);
-}
-
-void LiberaArvoreBE(TipoApontadorBE Ap) {
-    if (Ap != NULL) {
-        for (int i = 0; i <= Ap->n; i++) {
-            LiberaArvoreBE(Ap->p[i]);
-        }
-        free(Ap);
-    }
 }

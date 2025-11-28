@@ -3,94 +3,105 @@
 
 #include "arvoreb.h"
 #include "item.h"
+#include <string.h> // Essencial para memcpy e memmove
 #include <time.h>
 
+// Criação de Nó otimizada com calloc (zera memória automaticamente)
 B_No* B_criaNo(bool folha) {
-    B_No* no = (B_No*)malloc(sizeof(B_No));
+    B_No* no = (B_No*)calloc(1, sizeof(B_No));
     if (no == NULL) {
         perror("Erro fatal: Memoria insuficiente");
         exit(1);
     }
-    no->qtdChaves = 0;
     no->folha = folha;
-    for (int i = 0; i <= MAX; i++) {
-        no->filhos[i] = NULL;
-    }
+    // qtdChaves inicia em 0 e filhos em NULL automaticamente pelo calloc
     return no;
 }
 
+// Busca mais limpa e direta
 FilePos B_arvoreBusca(B_No* raiz, int chave, AnaliseExperimental* analise) {
-    int i = 0;
     if (raiz == NULL) return -1;
 
-    while (i < raiz->qtdChaves) {
+    int i = 0;
+    // Procura a primeira chave maior ou igual a buscada
+    while (i < raiz->qtdChaves && chave > raiz->chaves[i]) {
         analise->numComparacoes++;
-        if (chave == raiz->chaves[i]) {
-            return raiz->offsets[i]; 
-        } else if (chave > raiz->chaves[i]) {
-            i++;
-        } else {
-            break;
-        }
+        i++;
     }
 
+    // Se achou a chave neste nó
+    if (i < raiz->qtdChaves && chave == raiz->chaves[i]) {
+        analise->numComparacoes++; // Confirmação da igualdade
+        return raiz->offsets[i];
+    }
+
+    // Se é folha e não achou, não existe
     if (raiz->folha) return -1;
+
+    // Desce para o filho apropriado
     return B_arvoreBusca(raiz->filhos[i], chave, analise);
 }
 
+// Split simplificado com memmove (substitui loops manuais)
 void B_splitFilho(B_No* pai, int i, B_No* filho) {
     B_No* novo = B_criaNo(filho->folha);
     novo->qtdChaves = M - 1;
 
-    for (int j = 0; j < M - 1; j++) {
-        novo->chaves[j] = filho->chaves[j + M + 1];
-        novo->offsets[j] = filho->offsets[j + M + 1]; 
-    }
+    // 1. Copia metade direita (chaves/offsets) do filho para o novo nó
+    memcpy(novo->chaves, &filho->chaves[M + 1], (M - 1) * sizeof(int));
+    memcpy(novo->offsets, &filho->offsets[M + 1], (M - 1) * sizeof(FilePos));
 
+    // 2. Se não for folha, copia os filhos correspondentes
     if (!filho->folha) {
-        for (int j = 0; j < M; j++) {
-            novo->filhos[j] = filho->filhos[j + M + 1];
-        }
+        memcpy(novo->filhos, &filho->filhos[M + 1], M * sizeof(B_No*));
     }
 
-    filho->qtdChaves = M;
+    filho->qtdChaves = M; // Ajusta tamanho do filho original
 
-    for (int j = pai->qtdChaves; j >= i + 1; j--) {
-        pai->filhos[j + 1] = pai->filhos[j];
-    }
+    // 3. Abre espaço no PAI para subir a chave mediana
+    // Empurra filhos do pai para a direita
+    memmove(&pai->filhos[i + 2], &pai->filhos[i + 1], (pai->qtdChaves - i) * sizeof(B_No*));
+    // Empurra chaves e offsets do pai para a direita
+    memmove(&pai->chaves[i + 1], &pai->chaves[i], (pai->qtdChaves - i) * sizeof(int));
+    memmove(&pai->offsets[i + 1], &pai->offsets[i], (pai->qtdChaves - i) * sizeof(FilePos));
+
+    // 4. Conecta o novo nó e sobe a mediana
     pai->filhos[i + 1] = novo;
-
-    for (int j = pai->qtdChaves - 1; j >= i; j--) {
-        pai->chaves[j + 1] = pai->chaves[j];
-        pai->offsets[j + 1] = pai->offsets[j];
-    }
-
     pai->chaves[i] = filho->chaves[M];
     pai->offsets[i] = filho->offsets[M];
     pai->qtdChaves++;
 }
 
+// Inserção em nó não cheio (refatorada)
 void B_insereNaoCheio(B_No* no, int chave, FilePos offset, AnaliseExperimental* analise) {
     int i = no->qtdChaves - 1;
 
     if (no->folha) {
+        // Encontra a posição correta de trás para frente
         while (i >= 0 && chave < no->chaves[i]) {
             analise->numComparacoes++;
-            no->chaves[i + 1] = no->chaves[i];
-            no->offsets[i + 1] = no->offsets[i];
             i--;
         }
-        if (i >= 0) analise->numComparacoes++;
+        if (i >= 0) analise->numComparacoes++; // Última comparação que falhou o while
 
-        no->chaves[i + 1] = chave;
-        no->offsets[i + 1] = offset;
+        i++; // Posição de inserção
+
+        // Abre espaço usando memmove (mais eficiente que loop)
+        memmove(&no->chaves[i + 1], &no->chaves[i], (no->qtdChaves - i) * sizeof(int));
+        memmove(&no->offsets[i + 1], &no->offsets[i], (no->qtdChaves - i) * sizeof(FilePos));
+
+        no->chaves[i] = chave;
+        no->offsets[i] = offset;
         no->qtdChaves++;
     } else {
+        // Busca o filho para descer
         while (i >= 0 && chave < no->chaves[i]) {
             analise->numComparacoes++;
             i--;
         }
         i++;
+        
+        // Verifica se o filho está cheio antes de descer (Top-Down)
         if (no->filhos[i]->qtdChaves == MAX) {
             B_splitFilho(no, i, no->filhos[i]);
             if (chave > no->chaves[i]) {
@@ -101,9 +112,14 @@ void B_insereNaoCheio(B_No* no, int chave, FilePos offset, AnaliseExperimental* 
     }
 }
 
+// Função principal de inserção
 void B_arvoreInsere(ArvoreB* arvore, int chave, FilePos offset, AnaliseExperimental* analise) {
     if (*arvore == NULL) {
         *arvore = B_criaNo(true);
+        (*arvore)->chaves[0] = chave;
+        (*arvore)->offsets[0] = offset;
+        (*arvore)->qtdChaves = 1;
+        return;
     }
 
     B_No* raiz = *arvore;
@@ -119,14 +135,18 @@ void B_arvoreInsere(ArvoreB* arvore, int chave, FilePos offset, AnaliseExperimen
     }
 }
 
+// Liberação de memória recursiva
 void B_liberaArvoreB(ArvoreB arvore) {
     if (arvore == NULL) return;
-    for (int i = 0; i <= arvore->qtdChaves; i++) {
-        B_liberaArvoreB(arvore->filhos[i]);
+    if (!arvore->folha) {
+        for (int i = 0; i <= arvore->qtdChaves; i++) {
+            B_liberaArvoreB(arvore->filhos[i]);
+        }
     }
     free(arvore);
 }
 
+// Função Driver (mantida idêntica à original, apenas formatação)
 void RodaArvoreB(const char* nomeArq, int chave_procurada, int quantReg, bool P_flag) {
     ArvoreB arvoreB = NULL;
     Item item_lido;
@@ -134,12 +154,16 @@ void RodaArvoreB(const char* nomeArq, int chave_procurada, int quantReg, bool P_
 
     // --- FASE 1: CRIACAO ---
     FILE* arquivoCriacao = fopen(nomeArq, "rb");
-    if (arquivoCriacao == NULL) { perror("Erro"); return; }
+    if (arquivoCriacao == NULL) { perror("Erro ao abrir arquivo"); return; }
 
     clock_t start_criacao = clock();
     while (true) {
         FilePos posicao_atual = ftello(arquivoCriacao);
         if (fread(&item_lido, sizeof(Item), 1, arquivoCriacao) != 1) break;
+        
+        // Opcional: limitar quantidade de registros se quantReg > 0
+        // if (quantReg > 0 && analiseCriacao.numTransferencias >= quantReg) break;
+
         analiseCriacao.numTransferencias++;
         B_arvoreInsere(&arvoreB, item_lido.chave, posicao_atual, &analiseCriacao);
     }
@@ -193,7 +217,7 @@ void RodaArvoreB(const char* nomeArq, int chave_procurada, int quantReg, bool P_
         printf("Comparacoes:    %d\n", analisePesquisa.numComparacoes);
 
     } else {
-        printf("Modo experimental (media) nao formatado neste padrao.\n");
+        printf("Modo experimental (media) nao ativado.\n");
     }
     printf("========================================================\n");
 
