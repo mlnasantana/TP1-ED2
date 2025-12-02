@@ -5,12 +5,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
+#include "item.h"
+#include "analiseExperimental.h" // Importante incluir
 
-// --- ADICIONE ESTA LINHA OBRIGATORIAMENTE ---
-#include "item.h" 
-// -------------------------------------------
-
-#define M 100
+#define M 100 // Ordem da árvore (ajustável)
 #define MAX (2 * M)
 
 typedef off_t FilePos; 
@@ -25,10 +23,15 @@ typedef struct B_No {
 
 typedef B_No* ArvoreB; 
 
+// Funções auxiliares de gerenciamento
 B_No* B_criaNo(bool folha);
-void B_arvoreInsere(ArvoreB* arvore, int chave, FilePos offset, AnaliseExperimental* analise);
-FilePos B_arvoreBusca(B_No* raiz, int chave, AnaliseExperimental* analise);
-void RodaArvoreB(const char* nomeArq, int chave_procurada, int quantReg, bool P_flag);
-void B_liberaArvoreB(ArvoreB arvore);
+void B_liberaArvore(B_No* no);
+
+// Funções principais instrumentadas
+void B_inserir(ArvoreB* arvore, int chave, FilePos offset, AnaliseExperimental* analise);
+FilePos B_pesquisa(B_No* raiz, int chave, AnaliseExperimental* analise);
+
+// Função que segue o padrão do projeto para o experimento
+bool pesquisaArvoreB(FILE *arquivo, int quantReg, Item *itemP, AnaliseExperimental *analise);
 
 #endif

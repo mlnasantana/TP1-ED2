@@ -6,6 +6,7 @@
 #include <stdbool.h>
 #include <sys/types.h> // Para off_t
 #include "item.h"
+#include "analiseExperimental.h" // Adicionado
 
 #define M_ESTRELA 100
 #define MM_ESTRELA (2 * M_ESTRELA)
@@ -21,11 +22,13 @@ typedef struct TipoPaginaBE {
     TipoApontadorBE p[MM_ESTRELA + 1]; 
 } TipoPaginaBE;
 
-// Protótipos
+// Protótipos Instrumentados
 void InicializaArvoreBEst(TipoApontadorBE* Arvore);
-void InsereBEst(int chave, TipoOffset offset, TipoApontadorBE* Ap, int* comp);
-TipoOffset PesquisaBE(int chave, TipoApontadorBE Ap, int* comp);
+void InsereBEst(int chave, TipoOffset offset, TipoApontadorBE* Ap, AnaliseExperimental* analise);
+TipoOffset PesquisaBE(int chave, TipoApontadorBE Ap, AnaliseExperimental* analise);
 void LiberaArvoreBE(TipoApontadorBE Ap);
-void RodaArvoreBEstrela(const char* nomeArq, int chave_procurada, int quantReg, bool P_flag);
+
+// Função Wrapper padrão do projeto
+bool pesquisaArvoreBEstrela(FILE *arquivo, int quantReg, Item *itemP, AnaliseExperimental *analise);
 
 #endif

@@ -1,19 +1,17 @@
 #include "geradorDeArquivos.h"
 
-// Gera string aleatória para preencher os dados 1 e 2
+// Gera string aleatória para preencher dado2 (até 4999 chars)
 void gerarString(char *str, int tamanho){
     for (int i = 0; i < tamanho - 1; i++){
-        // Gera uma letra aleatória de 'a' a 'z'
-        str[i] = 'a' + rand() % 26;
+        str[i] = 'a' + rand() % 26;   // letra aleatória
     }
-    // Adiciona o \0 no final da string
-    str[tamanho - 1] = '\0';
+    str[tamanho - 1] = '\0';          // termina a string
 }
 
-// Embaralha o vetor de chaves usando o algoritmo de Fisher-Yates
+// Embaralha o vetor de chaves usando Fisher-Yates
 void embaralhar(int *vetor, int n){
-    for (int i = n - 1; i > 0; i--) {
-        int j = rand() % (i + 1); // Índice aleatório entre 0 e i
+    for (int i = n - 1; i > 0; i--){
+        int j = rand() % (i + 1);
         int temp = vetor[i];
         vetor[i] = vetor[j];
         vetor[j] = temp;
@@ -21,64 +19,65 @@ void embaralhar(int *vetor, int n){
 }
 
 int gerarArquivo(int quantReg, int situacao, const char *nomeArq){
-    // Semente para geração de números aleatórios
     srand(time(NULL));
 
-    // Vetor para armazenar as chaves
-    int *chaves = malloc(sizeof(int)*quantReg);
+    int *chaves = malloc(sizeof(int) * quantReg);
+    if (chaves == NULL) return 0;
 
-    // Item que iremos escrever no arquivo
     Item item;
 
+    // Situação 2 = decrescente
     if (situacao == 2){
         for (int j = quantReg; j > 0; j--){
-            chaves[quantReg - j] = j; // Preenche o vetor de chaves em ordem decrescente
+            chaves[quantReg - j] = j;
         }
-    }
-    else{
-        // Preenche o vetor com chaves de 1 a quantReg
+    } 
+    else {
+        // Situação 1 = crescente, Situação 3 = aleatório
         for (int i = 0; i < quantReg; i++){
-            chaves[i] = i +1; 
+            chaves[i] = i + 1;
         }
+
         if (situacao == 3){
             embaralhar(chaves, quantReg);
         }
-        
     }
 
     FILE *arquivo = fopen(nomeArq, "wb");
-
-    // Erro ao abrir o arquivo
-    if (arquivo == NULL) {
-        return 0; 
+    if (arquivo == NULL){
+        free(chaves);
+        return 0;
     }
 
-    // Preenche o arquivo com os itens gerados
+    // Gerar registros
     for (int i = 0; i < quantReg; i++){
         item.chave = chaves[i];
-        item.dado1 = rand(); // Número aletório
-        //gerarString(item.dado2, sizeof(item.dado2));
-        //gerarString(item.dado3, sizeof(item.dado3));
-        gerarString(item.dado2, 3);
-        gerarString(item.dado3, 5);
+        item.dado1 = rand();
+
+        // Gera string grande (4999 chars úteis + '\0')
+        gerarString(item.dado2, sizeof(item.dado2));
+
         fwrite(&item, sizeof(Item), 1, arquivo);
     }
-    
+
     free(chaves);
     fclose(arquivo);
-    return 1; // Sucesso
+    return 1;
 }
 
 void mostraArquivo(const char *nomeArq){
     FILE *arquivo = fopen(nomeArq, "rb");
-    if (arquivo == NULL) {
+    if (arquivo == NULL){
         printf("Erro ao abrir o arquivo %s\n", nomeArq);
         return;
     }
 
     Item item;
-    while (fread(&item, sizeof(Item), 1, arquivo) == 1) {
-        printf("Chave: %d, Dado1: %ld, Dado2: %s, Dado3: %s\n\n", item.chave, item.dado1, item.dado2, item.dado3);
+
+    while (fread(&item, sizeof(Item), 1, arquivo) == 1){
+        printf("Chave: %d\n", item.chave);
+        printf("Dado1: %ld\n", item.dado1);
+        printf("Dado2 (primeiros 80 chars): %.80s...\n\n", item.dado2);
     }
 
     fclose(arquivo);
