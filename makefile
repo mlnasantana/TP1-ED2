@@ -1,9 +1,12 @@
-all: main.o arvoreb.o arvorebe.o sequencialIndex.o geradorDeArquivos.o analiseExperimental.o
-	@gcc main.o arvoreb.o arvorebe.o sequencialIndex.o geradorDeArquivos.o analiseExperimental.o -o pesquisa -lm
-	@rm -f main.o arvoreb.o arvorebe.o sequencialIndex.o geradorDeArquivos.o analiseExperimental.o
+all: main.o arvorebin.o arvoreb.o arvorebe.o sequencialIndex.o geradorDeArquivos.o analiseExperimental.o
+	@gcc main.o arvorebin.o arvoreb.o arvorebe.o sequencialIndex.o geradorDeArquivos.o analiseExperimental.o -o pesquisa -lm
+	@rm -f main.o arvorebin.o arvoreb.o arvorebe.o sequencialIndex.o geradorDeArquivos.o analiseExperimental.o
 
 main.o: main.c
 	@gcc -c main.c -Wall
+
+arvorebin.o: arvorebin.c
+	@gcc -c arvorebin.c -Wall
 
 arvoreb.o: arvoreb.c
 	@gcc -c arvoreb.c -Wall

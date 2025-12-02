@@ -1,180 +1,133 @@
 #include "arvorebin.h"
 
-NoArvoreBin* criarNoArvoreBin(int chave, long int offset) {
-    NoArvoreBin* novoNo = (NoArvoreBin*)malloc(sizeof(NoArvoreBin));
-    if (novoNo == NULL) {
-        perror("Erro ao alocar memória para o nó da árvore binária");
-        exit(EXIT_FAILURE);
-    }
-    novoNo->chave = chave;
-    novoNo->offset = offset;
-    novoNo->esquerda = NULL;
-    novoNo->direita = NULL;
-    return novoNo;
+// ... (Mantenha as funções criarNo e inserirNaArvoreBin iguais à resposta anterior) ...
+
+NoArvoreBin criarNo(int chave, long int offsetDado) {
+    NoArvoreBin no;
+    no.chave = chave;
+    no.offsetDado = offsetDado;
+    no.esquerda = NULL_DISK;
+    no.direita = NULL_DISK;
+    return no;
 }
 
-NoArvoreBin* inserirNaArvoreBin(NoArvoreBin* raiz, int chave, long int offset, AnaliseExperimental *analise) {
-    if (raiz == NULL) {
-        return criarNoArvoreBin(chave, offset);
+long int inserirNaArvoreBin(FILE* arqArvore, long int posAtual, int chave, long int offsetDado, AnaliseExperimental *analise) {
+    if (posAtual == NULL_DISK) {
+        NoArvoreBin novoNo = criarNo(chave, offsetDado);
+        fseek(arqArvore, 0, SEEK_END);
+        long int novaPos = ftell(arqArvore);
+        fwrite(&novoNo, sizeof(NoArvoreBin), 1, arqArvore);
+        analise->numTransferencias++;
+        return novaPos;
     }
 
+    NoArvoreBin noAtual;
+    fseek(arqArvore, posAtual, SEEK_SET);
+    fread(&noAtual, sizeof(NoArvoreBin), 1, arqArvore);
+    analise->numTransferencias++;
     analise->numComparacoes++;
-    if (chave < raiz->chave) {
-        raiz->esquerda = inserirNaArvoreBin(raiz->esquerda, chave, offset, analise);
-    } else if (chave > raiz->chave) {
-        raiz->direita = inserirNaArvoreBin(raiz->direita, chave, offset, analise);
+
+    if (chave < noAtual.chave) {
+        long int novoEsq = inserirNaArvoreBin(arqArvore, noAtual.esquerda, chave, offsetDado, analise);
+        if (novoEsq != noAtual.esquerda) {
+            noAtual.esquerda = novoEsq;
+            fseek(arqArvore, posAtual, SEEK_SET);
+            fwrite(&noAtual, sizeof(NoArvoreBin), 1, arqArvore);
+            analise->numTransferencias++;
+        }
+    } else if (chave > noAtual.chave) {
+        long int novoDir = inserirNaArvoreBin(arqArvore, noAtual.direita, chave, offsetDado, analise);
+        if (novoDir != noAtual.direita) {
+            noAtual.direita = novoDir;
+            fseek(arqArvore, posAtual, SEEK_SET);
+            fwrite(&noAtual, sizeof(NoArvoreBin), 1, arqArvore);
+            analise->numTransferencias++;
+        }
     }
-    return raiz;
+    return posAtual;
 }
 
-NoArvoreBin* construirArvoreBin(const char* nomeArquivo, AnaliseExperimental *analiseCriacao) {
-    FILE* arquivo = fopen(nomeArquivo, "rb");
-    if (arquivo == NULL) {
-        perror("Erro ao abrir o arquivo para construir a árvore binária");
-        return NULL;
-    }
+void construirArvoreBin(const char* nomeArquivoDados, const char* nomeArquivoArvore, AnaliseExperimental *analiseCriacao) {
+    FILE* arqDados = fopen(nomeArquivoDados, "rb");
+    if (!arqDados) return;
 
-    NoArvoreBin* raiz = NULL;
+    FILE* arqArvore = fopen(nomeArquivoArvore, "w+b");
+    if (!arqArvore) { fclose(arqDados); return; }
+
     Item item;
-    long int offsetAtual = 0;
-
+    long int offsetDadoAtual = 0;
+    long int raizOffset = NULL_DISK;
+    
     clock_t inicio = clock();
 
-    while (fread(&item, sizeof(Item), 1, arquivo) == 1) {
+    while (fread(&item, sizeof(Item), 1, arqDados) == 1) {
         analiseCriacao->numTransferencias++;
-        raiz = inserirNaArvoreBin(raiz, item.chave, offsetAtual, analiseCriacao);
-        offsetAtual = ftell(arquivo);
+        raizOffset = inserirNaArvoreBin(arqArvore, raizOffset, item.chave, offsetDadoAtual, analiseCriacao);
+        offsetDadoAtual = ftell(arqDados);
     }
 
     clock_t fim = clock();
-    analiseCriacao->tempoExecucao = (long int)(((double)(fim - inicio)) / CLOCKS_PER_SEC * 1000000.0);
+    analiseCriacao->tempoExecucao = (double)(fim - inicio) / CLOCKS_PER_SEC;
 
-    fclose(arquivo);
-    return raiz;
+    fclose(arqDados);
+    fclose(arqArvore);
 }
 
-Item* pesquisarArvoreBin(NoArvoreBin* raiz, int chave, FILE* arquivo, AnaliseExperimental *analise) {
-    if (arquivo == NULL) {
-        fprintf(stderr, "Erro: Arquivo não pode ser NULL para pesquisa.\n");
-        return NULL;
-    }
+Item* pesquisarArvoreBin(FILE* arqArvore, long int posRaiz, int chave, FILE* arqDados, AnaliseExperimental *analise) {
+    if (posRaiz == NULL_DISK) return NULL;
 
-    Item* itemEncontrado = NULL;
-    analise->numTransferencias = 0;
-    analise->numComparacoes = 0;
-    clock_t inicio = clock();
+    NoArvoreBin noAtual;
+    long int posAtual = posRaiz;
 
-    NoArvoreBin* atual = raiz;
-    while (atual != NULL) {
+    while (posAtual != NULL_DISK) {
+        fseek(arqArvore, posAtual, SEEK_SET);
+        fread(&noAtual, sizeof(NoArvoreBin), 1, arqArvore);
+        analise->numTransferencias++;
         analise->numComparacoes++;
-        if (chave == atual->chave) {
-            if (fseek(arquivo, atual->offset, SEEK_SET) != 0) {
-                perror("Erro ao posicionar no arquivo para ler o Item");
-                break;
-            }
-            itemEncontrado = (Item*)malloc(sizeof(Item));
-            if (itemEncontrado == NULL) {
-                perror("Erro ao alocar memória para o Item encontrado");
-                break;
-            }
-            if (fread(itemEncontrado, sizeof(Item), 1, arquivo) == 1) {
+
+        if (chave == noAtual.chave) {
+            Item* itemEncontrado = (Item*)malloc(sizeof(Item));
+            fseek(arqDados, noAtual.offsetDado, SEEK_SET);
+            if (fread(itemEncontrado, sizeof(Item), 1, arqDados) == 1) {
                 analise->numTransferencias++;
+                return itemEncontrado;
             } else {
-                perror("Erro ao ler o Item do arquivo");
                 free(itemEncontrado);
-                itemEncontrado = NULL;
+                return NULL;
             }
-            break;
-        } else if (chave < atual->chave) {
-            atual = atual->esquerda;
-        } else {
-            atual = atual->direita;
-        }
+        } 
+        else if (chave < noAtual.chave) posAtual = noAtual.esquerda;
+        else posAtual = noAtual.direita;
     }
-
-    clock_t fim = clock();
-    analise->tempoExecucao = (long int)(((double)(fim - inicio)) / CLOCKS_PER_SEC * 1000000.0);
-
-    return itemEncontrado;
+    return NULL;
 }
 
-void imprimirChavesArvoreBin(NoArvoreBin* raiz) {
-    if (raiz != NULL) {
-        imprimirChavesArvoreBin(raiz->esquerda);
-        printf("Chave: %d, Offset: %ld\n", raiz->chave, raiz->offset);
-        imprimirChavesArvoreBin(raiz->direita);
-    }
-}
-
-void liberarArvoreBin(NoArvoreBin* raiz) {
-    if (raiz != NULL) {
-        liberarArvoreBin(raiz->esquerda);
-        liberarArvoreBin(raiz->direita);
-        free(raiz);
-    }
-}
-
-void RodaArvoreBinaria(const char* nomeArq, int chave_procurada, int quantReg, bool P_flag) {
-    NoArvoreBin* raizArvoreBin = NULL;
-    AnaliseExperimental analiseCriacao = {0, 0, 0};
-
-    // --- FASE 1: CRIACAO ---
-    raizArvoreBin = construirArvoreBin(nomeArq, &analiseCriacao);
-    if (raizArvoreBin == NULL) {
-        fprintf(stderr, "Erro ao construir a arvore binaria.\n");
-        return;
+// === IMPLEMENTAÇÃO DO WRAPPER ===
+bool pesquisaArvoreBinariaWrapper(FILE* arqDados, int quantReg, Item* item, AnaliseExperimental* analise) {
+    // 1. Abre o arquivo de índice (criado previamente no main)
+    FILE* arqArvore = fopen("arvore_index.bin", "rb");
+    if (arqArvore == NULL) {
+        perror("Erro ao abrir arquivo de índice na pesquisa");
+        return false;
     }
 
-    printf("\n========================================================\n");
-    printf("METODO: 2 - ARVORE BINARIA EXTERNA\n");
-    printf("========================================================\n");
+    // 2. Verifica se a árvore tem conteúdo (raiz começa no offset 0 se arquivo > 0)
+    long int raizOffset = 0;
+    fseek(arqArvore, 0, SEEK_END);
+    if (ftell(arqArvore) == 0) raizOffset = NULL_DISK;
+
+    // 3. Realiza a pesquisa
+    Item* resultado = pesquisarArvoreBin(arqArvore, raizOffset, item->chave, arqDados, analise);
     
-    printf("--- FASE 1: CRIACAO DO INDICE ---\n");
-    printf("Tempo Execucao: %.6f s\n", (double)analiseCriacao.tempoExecucao / 1000000.0);
-    printf("Transferencias: %d\n", analiseCriacao.numTransferencias);
-    printf("Comparacoes:    %d\n", analiseCriacao.numComparacoes);
+    // 4. Fecha índice
+    fclose(arqArvore);
 
-    // --- FASE 2: PESQUISA ---
-    printf("\n--- FASE 2: PESQUISA ---\n");
-    
-    AnaliseExperimental analisePesquisa = {0, 0, 0};
-    bool encontrado = false;
-    Item resultado;
-
-    if (chave_procurada != -1) {
-        FILE* arquivoParaPesquisa = fopen(nomeArq, "rb");
-        if (arquivoParaPesquisa == NULL) {
-            perror("Erro ao abrir arquivo");
-            liberarArvoreBin(raizArvoreBin);
-            return;
-        }
-
-        Item* temp_resultado = pesquisarArvoreBin(raizArvoreBin, chave_procurada, arquivoParaPesquisa, &analisePesquisa);
-        if (temp_resultado != NULL) {
-            resultado = *temp_resultado;
-            free(temp_resultado);
-            encontrado = true;
-        }
-        fclose(arquivoParaPesquisa);
-
-        if (encontrado) {
-            printf("[STATUS]: ITEM ENCONTRADO\n");
-            printf("> Chave:  %d\n", resultado.chave);
-            printf("> Dado1:  %ld\n", resultado.dado1);
-            if(P_flag) printf("> Dado2:  %.50s...\n", resultado.dado2);
-        } else {
-            printf("[STATUS]: ITEM NAO ENCONTRADO (Chave %d)\n", chave_procurada);
-        }
-
-        printf("\n--- METRICAS DE PESQUISA ---\n");
-        printf("Tempo Execucao: %.6f s\n", (double)analisePesquisa.tempoExecucao / 1000000.0);
-        printf("Transferencias: %d\n", analisePesquisa.numTransferencias);
-        printf("Comparacoes:    %d\n", analisePesquisa.numComparacoes);
-
-    } else {
-        printf("Modo experimental (10 buscas) nao formatado neste padrao.\n");
+    // 5. Processa resultado
+    if (resultado != NULL) {
+        *item = *resultado; // Copia dados para o ponteiro do main
+        free(resultado);
+        return true;
     }
-    printf("========================================================\n");
 
-    if (raizArvoreBin) liberarArvoreBin(raizArvoreBin);
+    return false;
 }
