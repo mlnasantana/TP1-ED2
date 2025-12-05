@@ -17,18 +17,38 @@ void imprimeAnalise(AnaliseExperimental *analise, Item *itemP){
     printf("========================================================\n");
 }
 
-//Gera 20 chaves distribuídas uniformemente no intervalo de 1 a quantReg
+#include <stdbool.h>
+#include <stdlib.h>
+
+// Verifica se uma chave já foi gerada
+bool chaveExiste(int chaves[], int usados, int chave) {
+    for (int i = 0; i < usados; i++) {
+        if (chaves[i] == chave) return true;
+    }
+    return false;
+}
+
+// Gera 20 chaves distribuídas, aleatórias e sem repetição
 void gerarChaves(int quantReg, int chaves[20]) {
     int passo = quantReg / 20;
-    if (passo == 0) passo = 1;
+    if (passo == 0) passo = 1; // Para arquivos muito pequenos
 
     for (int i = 0; i < 20; i++) {
-        chaves[i] = i * passo + 1;
-        if (chaves[i] > quantReg) {
-            chaves[i] = quantReg; //Ajusta caso ultrapasse
-        }
+
+        int inicio = i * passo + 1;
+        int fim = (i == 19 ? quantReg : (i + 1) * passo);
+
+        int chave;
+
+        // Garante que não repete chave
+        do {
+            chave = inicio + rand() % (fim - inicio + 1);
+        } while (chaveExiste(chaves, i, chave));
+
+        chaves[i] = chave;
     }
 }
+
 
 //Executa o experimento de pesquisa 20 vezes e calcula a média dos resultados
 void executarExperimento(FILE *arquivo, int quantReg, AnaliseExperimental *media, bool (*funcaoPesquisa)(FILE*, int, Item*, AnaliseExperimental*)){
